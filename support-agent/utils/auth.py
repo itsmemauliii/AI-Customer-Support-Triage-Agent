@@ -68,6 +68,8 @@ def get_user_role(user_id):
         .eq("id", user_id)
         .execute()
     )
-    if res.data:
+
+    if res.data and len(res.data) > 0:
         return res.data[0]["role"]
+
     return "agent"
