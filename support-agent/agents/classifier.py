@@ -1,19 +1,20 @@
-import json
-from langchain_openai import ChatOpenAI
-
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-
-
 def classify_ticket(state):
-    ticket = state["ticket"]
+    text = state["ticket"].lower()
 
-    prompt = open("prompts/classify.txt").read()
+    if "refund" in text or "charge" in text:
+        state["category"] = "billing"
+        state["urgency"] = "high"
+        state["sentiment"] = "angry"
+        state["escalate"] = True
+    elif "login" in text or "password" in text:
+        state["category"] = "login"
+        state["urgency"] = "medium"
+        state["sentiment"] = "neutral"
+        state["escalate"] = False
+    else:
+        state["category"] = "other"
+        state["urgency"] = "low"
+        state["sentiment"] = "calm"
+        state["escalate"] = False
 
-    response = llm.invoke(
-        f"{prompt}\n\nTicket:\n{ticket}"
-    )
-
-    data = json.loads(response.content)
-
-    state.update(data)
     return state
