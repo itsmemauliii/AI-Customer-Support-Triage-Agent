@@ -116,3 +116,18 @@ if page == "Audit Logs":
                 st.progress(int(log.get("confidence",0) * 100))
                 st.markdown("**Ticket:**")
                 st.write(log.get("ticket_text",""))
+import pandas as pd
+
+df = pd.DataFrame(logs)
+csv = df.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    "⬇️ Export CSV",
+    csv,
+    "audit_logs.csv",
+    "text/csv"
+)
+from dashboards.manager import manager_dashboard
+
+if page == "Manager Dashboard":
+    manager_dashboard()
