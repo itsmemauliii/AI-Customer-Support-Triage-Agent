@@ -1,21 +1,37 @@
+# dashboards/manager.py
 import streamlit as st
+import pandas as pd
+import plotly.express as px
 from utils.supabase_client import supabase
 
 def manager_dashboard():
-    st.title("📊 Manager Dashboard")
+    st.title("📈 Manager Dashboard")
 
-    data = (
-        supabase.table("support_audit_logs")
-        .select("urgency, escalate")
-        .execute()
-        .data
-    )
+    # ---------------- LOGS TREND ----------------
+    logs = supabase.table("support_audit_logs").select("*").order("created_at", desc=False).execute().data
+    df = pd.DataFrame(logs)
 
-    total = len(data)
-    escalations = sum(1 for d in data if d["escalate"])
+    if df.empty:
+        st.info("No tickets analyzed yet.")
+        return
 
-    col1, col2 = st.columns(2)
-    col1.metric("Total Tickets", total)
-    col2.metric("Escalations", escalations)
+    df['created_at'] = pd.to_datetime(df['created_at'])
+    df['date'] = df['created_at'].dt.date
 
-    st.progress(int((escalations / max(total,1)) * 100))
+    # Escalation trend
+    escalations = df[df['escalate']==True].groupby('date').size().reset_index(name='count')
+    st.subheader("🚨 Escalations Trend")
+    fig = px.bar(escalations, x='date', y='count', title="Escalations per day", color='count')
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Confidence distribution
+    st.subheader("📊 Confidence Distribution")
+    fig2 = px.histogram(df, x='confidence', nbins=10, title="Confidence of AI Decisions", color='confidence')
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # Tickets by category
+    st.subheader("🏷️ Tickets by Category")
+    cat_counts = df['category'].value_counts().reset_index()
+    cat_counts.columns = ['category','count']
+    fig3 = px.pie(cat_counts, names='category', values='count', title='Tickets by Category')
+    st.plotly_chart(fig3, use_container_width=True)
