@@ -6,7 +6,6 @@ st.set_page_config(page_title="AI Support Triage Agent")
 st.title("🧠 AI Customer Support Triage Agent")
 
 ticket = st.text_area("Paste support ticket", height=200)
-plan = st.selectbox("Customer plan", ["Free", "Paid", "Enterprise"])
 
 if st.button("Analyze Ticket"):
     if not ticket.strip():
@@ -16,7 +15,6 @@ if st.button("Analyze Ticket"):
 
         state = {
             "ticket": ticket,
-            "plan": plan
         }
 
         result = graph.invoke(state)
