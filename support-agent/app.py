@@ -1,57 +1,112 @@
 import streamlit as st
 from graph.workflow import build_graph
 from utils.supabase_client import supabase
+from utils.auth import login, signup
+
+# ---------------- CONFIG ----------------
+CONFIDENCE_THRESHOLD = 0.6
+
+st.set_page_config(page_title="AI Support Triage", layout="centered")
 st.title("🎧 AI Support Triage Agent")
 
-ticket = st.text_area("Paste customer ticket")
+# ---------------- AUTH GATE ----------------
+if "user" not in st.session_state:
+    tab1, tab2 = st.tabs(["Login", "Sign up"])
+    with tab1:
+        login()
+    with tab2:
+        signup()
+    st.stop()
 
-if st.button("Analyze Ticket"):
-    graph = build_graph()
+# ---------------- NAVIGATION ----------------
+page = st.sidebar.radio(
+    "Navigation",
+    ["Analyze Ticket", "Audit Logs"]
+)
 
-    result = graph.invoke({
-        "ticket": ticket
-    })
+# ==================================================
+# 📊 PAGE 1 — ANALYZE TICKET
+# ==================================================
+if page == "Analyze Ticket":
+    ticket = st.text_area("Paste customer ticket")
 
-    # ---- UI STARTS HERE (result EXISTS now) ----
-    st.subheader("📊 Decision")
+    if st.button("Analyze Ticket"):
+        graph = build_graph()
+        result = graph.invoke({"ticket": ticket})
 
-    urgency_color = {
-        "low": "🟢 Low",
-        "medium": "🟡 Medium",
-        "high": "🔴 High"
-    }
-    st.markdown(f"**Urgency:** {urgency_color[result['urgency']]}")
+        # --------- DECISION UI ----------
+        st.subheader("📊 Decision")
 
-    st.markdown(f"**Category:** 🏷️ `{result['category'].capitalize()}`")
+        urgency_color = {
+            "low": "🟢 Low",
+            "medium": "🟡 Medium",
+            "high": "🔴 High"
+        }
+        st.markdown(f"**Urgency:** {urgency_color[result['urgency']]}")
 
-    sentiment_icon = {
-        "calm": "😌 Calm",
-        "neutral": "😐 Neutral",
-        "angry": "😠 Angry"
-    }
-    st.markdown(f"**Customer Mood:** {sentiment_icon[result['sentiment']]}")
+        st.markdown(f"**Category:** 🏷️ `{result['category'].capitalize()}`")
 
-    if result["escalate"]:
-        st.error("🚨 Escalation Required")
+        sentiment_icon = {
+            "calm": "😌 Calm",
+            "neutral": "😐 Neutral",
+            "angry": "😠 Angry"
+        }
+        st.markdown(f"**Customer Mood:** {sentiment_icon[result['sentiment']]}")
+
+        # --------- CONFIDENCE ----------
+        st.markdown("**Confidence**")
+        st.progress(int(result["confidence"] * 100))
+
+        # --------- CONFIDENCE WARNING ----------
+        if result["confidence"] < CONFIDENCE_THRESHOLD:
+            st.warning("⚠️ Low confidence. Auto-escalation suggested.")
+            result["escalate"] = True
+
+        # --------- ESCALATION ----------
+        if result["escalate"]:
+            st.error("🚨 Escalation Required")
+        else:
+            st.success("✅ No Escalation Needed")
+
+        # --------- SUGGESTED REPLY ----------
+        st.subheader("✉️ Suggested Reply")
+        st.write(result["suggested_reply"])
+
+        # --------- LOG TO SUPABASE (AFTER UI) ----------
+        supabase.table("support_audit_logs").insert({
+            "user_id": st.session_state["user"]["id"],
+            "ticket_text": ticket,
+            "urgency": result["urgency"],
+            "category": result["category"],
+            "sentiment": result["sentiment"],
+            "escalate": result["escalate"],
+            "confidence": result["confidence"]
+        }).execute()
+
+# ==================================================
+# 📜 PAGE 2 — AUDIT LOGS
+# ==================================================
+if page == "Audit Logs":
+    st.title("📜 Audit Logs")
+
+    logs = (
+        supabase
+        .table("support_audit_logs")
+        .select("*")
+        .eq("user_id", st.session_state["user"]["id"])
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
+
+    if not logs:
+        st.info("No logs yet.")
     else:
-        st.success("✅ No Escalation Needed")
-
-    st.markdown("**Confidence**")
-    st.progress(int(result["confidence"] * 100))
-
-    st.subheader("✉️ Suggested Reply")
-    st.write(result["suggested_reply"])
-# ---- Confidence warning ----
-if result["confidence"] < 0.6:
-    st.warning("⚠️ Low confidence decision. Manual review recommended.")
-
-# ---- LOG AFTER UI ----
-supabase.table("support_audit_logs").insert({
-    "user_id": st.session_state["user"]["id"],
-    "ticket_text": ticket,
-    "urgency": result["urgency"],
-    "category": result["category"],
-    "sentiment": result["sentiment"],
-    "escalate": result["escalate"],
-    "confidence": result["confidence"]
-}).execute()
+        for log in logs:
+            with st.expander(f"🕒 {log['created_at']} — {log['category']}"):
+                st.markdown(f"**Urgency:** {log['urgency']}")
+                st.markdown(f"**Sentiment:** {log['sentiment']}")
+                st.markdown(f"**Escalate:** {log['escalate']}")
+                st.progress(int(log["confidence"] * 100))
+                st.markdown("**Ticket:**")
+                st.write(log["ticket_text"])
