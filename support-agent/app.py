@@ -2,7 +2,9 @@ import streamlit as st
 from graph.workflow import build_graph
 from utils.supabase_client import supabase
 from utils.auth import login, signup, logout
-
+from dashboards.admin import admin_dashboard
+if page == "Admin Dashboard":
+    admin_dashboard()
 # ---------------- CONFIG ----------------
 CONFIDENCE_THRESHOLD = 0.6
 st.set_page_config(page_title="AI Support Triage", layout="centered")
