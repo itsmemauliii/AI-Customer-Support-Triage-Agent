@@ -22,13 +22,35 @@ if st.button("Analyze Ticket"):
         result = graph.invoke(state)
 
         st.subheader("📊 Decision")
-        st.json({
-            "urgency": result["urgency"],
-            "category": result["category"],
-            "sentiment": result["sentiment"],
-            "escalate": result["escalate"],
-            "confidence": result["confidence"]
-        })
+        st.subheader("📊 Decision")
 
-        st.subheader("✉️ Suggested Reply")
-        st.write(result["suggested_reply"])
+# Urgency badge
+urgency_color = {
+    "low": "🟢 Low",
+    "medium": "🟡 Medium",
+    "high": "🔴 High"
+}
+st.markdown(f"**Urgency:** {urgency_color[result['urgency']]}")
+
+# Category
+st.markdown(f"**Category:** 🏷️ `{result['category'].capitalize()}`")
+
+# Sentiment
+sentiment_icon = {
+    "calm": "😌 Calm",
+    "neutral": "😐 Neutral",
+    "angry": "😠 Angry"
+}
+st.markdown(f"**Customer Mood:** {sentiment_icon[result['sentiment']]}")
+
+# Escalation button
+if result["escalate"]:
+    st.error("🚨 Escalation Required")
+else:
+    st.success("✅ No Escalation Needed")
+
+# Confidence bar
+st.markdown("**Confidence**")
+st.progress(int(result["confidence"] * 100))
+st.subheader("✉️ Suggested Reply")
+st.write(result["suggested_reply"])
