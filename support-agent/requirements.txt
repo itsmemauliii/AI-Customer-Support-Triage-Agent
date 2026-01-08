@@ -1,7 +1,5 @@
 streamlit
-langgraph
-langchain
-pydantic
-python-dotenv
 supabase
+pandas
+plotly
 stripe
