@@ -3,8 +3,9 @@ from graph.workflow import build_graph
 from utils.supabase_client import supabase
 from utils.auth import login, signup, logout
 from dashboards.admin import admin_dashboard
-if page == "Admin Dashboard":
-    admin_dashboard()
+from dashboards.manager import manager_dashboard
+import pandas as pd
+
 # ---------------- CONFIG ----------------
 CONFIDENCE_THRESHOLD = 0.6
 st.set_page_config(page_title="AI Support Triage", layout="centered")
@@ -26,7 +27,7 @@ logout()  # sidebar logout button
 # ---------------- NAVIGATION ----------------
 page = st.sidebar.radio(
     "Navigation",
-    ["Analyze Ticket", "Audit Logs"]
+    ["Analyze Ticket", "Audit Logs", "Manager Dashboard", "Admin Dashboard"]
 )
 
 # ==================================================
@@ -92,7 +93,7 @@ if page == "Analyze Ticket":
 # ==================================================
 # 📜 PAGE 2 — AUDIT LOGS
 # ==================================================
-if page == "Audit Logs":
+elif page == "Audit Logs":
     st.title("📜 Audit Logs")
 
     logs = (
@@ -116,18 +117,25 @@ if page == "Audit Logs":
                 st.progress(int(log.get("confidence",0) * 100))
                 st.markdown("**Ticket:**")
                 st.write(log.get("ticket_text",""))
-import pandas as pd
 
-df = pd.DataFrame(logs)
-csv = df.to_csv(index=False).encode("utf-8")
+        # ---- CSV EXPORT ----
+        df = pd.DataFrame(logs)
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️ Export CSV",
+            csv,
+            "audit_logs.csv",
+            "text/csv"
+        )
 
-st.download_button(
-    "⬇️ Export CSV",
-    csv,
-    "audit_logs.csv",
-    "text/csv"
-)
-from dashboards.manager import manager_dashboard
-
-if page == "Manager Dashboard":
+# ==================================================
+# 📈 PAGE 3 — MANAGER DASHBOARD
+# ==================================================
+elif page == "Manager Dashboard":
     manager_dashboard()
+
+# ==================================================
+# 🛠 PAGE 4 — ADMIN DASHBOARD
+# ==================================================
+elif page == "Admin Dashboard":
+    admin_dashboard()
