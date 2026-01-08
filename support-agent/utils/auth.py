@@ -7,27 +7,67 @@ def login():
     email = st.text_input("Email", key="login_email")
     password = st.text_input("Password", type="password", key="login_password")
 
-    if st.button("Login", key="login_btn"):
-        res = supabase.auth.sign_in_with_password({
-            "email": email,
-            "password": password
-        })
-        st.session_state["user"] = res.user
-        st.rerun()
-def logout():
-    if st.sidebar.button("🚪 Logout"):
-        st.session_state.clear()
-        st.rerun()
+    if st.button("Login"):
+        try:
+            res = supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+
+            if res.user:
+                st.session_state["user"] = {
+                    "id": res.user.id,
+                    "email": res.user.email,
+                    "role": get_user_role(res.user.id)
+                }
+                st.success("✅ Logged in successfully")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
+        except Exception as e:
+            st.error("❌ Login failed. Check email & password.")
+            st.caption(str(e))
+
 
 def signup():
-    st.subheader("🆕 Sign up")
+    st.subheader("🆕 Create Account")
 
     email = st.text_input("Email", key="signup_email")
     password = st.text_input("Password", type="password", key="signup_password")
 
-    if st.button("Create account", key="signup_btn"):
-        supabase.auth.sign_up({
-            "email": email,
-            "password": password
-        })
-        st.success("Account created. Please log in.")
+    if st.button("Sign up"):
+        try:
+            res = supabase.auth.sign_up({
+                "email": email,
+                "password": password
+            })
+
+            if res.user:
+                st.success("🎉 Account created! Please login.")
+            else:
+                st.error("Signup failed")
+
+        except Exception as e:
+            st.error("❌ Signup error")
+            st.caption(str(e))
+
+
+def logout():
+    if st.sidebar.button("🚪 Logout"):
+        supabase.auth.sign_out()
+        st.session_state.clear()
+        st.rerun()
+
+
+def get_user_role(user_id):
+    res = (
+        supabase
+        .table("users")
+        .select("role")
+        .eq("id", user_id)
+        .execute()
+    )
+    if res.data:
+        return res.data[0]["role"]
+    return "agent"
