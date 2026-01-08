@@ -8,18 +8,9 @@ from dashboards.manager import manager_dashboard
 
 # ---------------- CONFIG ----------------
 CONFIDENCE_THRESHOLD = 0.6
-st.set_page_config(page_title="AI Support Triage", layout="centered")
-st.markdown(
-    """
-    <style>
-    /* Red sidebar */
-    .css-1d391kg {background-color: #ff4b4b;}
-    /* Sidebar text */
-    .css-1d391kg .css-1o9y3b3 {color: white;}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+
+st.set_page_config(page_title="AI Support Triage", layout="wide")
+st.markdown("<style> .sidebar .sidebar-content {background-color:#ff4b4b;} </style>", unsafe_allow_html=True)
 
 st.title("🎧 AI Support Triage Agent")
 
@@ -33,48 +24,53 @@ if "user" not in st.session_state:
         signup()
     st.stop()
 
-# ---------------- LOGOUT BUTTON ----------------
-st.sidebar.button("🚪 Logout", on_click=logout)
+# ---------------- LOGOUT ----------------
+st.sidebar.button("Logout", on_click=logout)
 
 # ---------------- NAVIGATION ----------------
-user_role = st.session_state["user"].get("role", "agent")  # agent or admin
-pages = ["Analyze Ticket", "Audit Logs", "Sample Tickets", "Settings", "Help"]
-if user_role == "admin":
-    pages += ["Manager Dashboard", "Admin Dashboard"]
+tabs = ["Analyze Ticket", "Audit Logs", "Manager Dashboard", "Admin Dashboard", "Settings"]
+page = st.sidebar.radio("Navigate", tabs)
 
-page = st.sidebar.radio("Navigate", pages)
-
-# =========================
+# ==================================================
 # 📊 PAGE 1 — ANALYZE TICKET
-# =========================
+# ==================================================
 if page == "Analyze Ticket":
-    ticket = st.text_area("Paste customer ticket", placeholder="Customer complaint, email, or chat message…")
+    st.subheader("📥 Paste Customer Ticket")
+    ticket = st.text_area("Customer complaint, email, or chat message here…")
 
-    if st.button("Analyze Ticket"):
+    if st.button("Analyze Ticket") and ticket.strip():
         graph = build_graph()
         result = graph.invoke({"ticket": ticket})
 
         # --------- DECISION UI ----------
-        urgency_color = {"low": "🟢 Low", "medium": "🟡 Medium", "high": "🔴 High"}
-        sentiment_icon = {"calm": "😌 Calm", "neutral": "😐 Neutral", "angry": "😠 Angry"}
-
-        urgency = str(result.get("urgency", "low")).strip().lower()
-        sentiment = str(result.get("sentiment", "neutral")).strip().lower()
-        confidence = float(result.get("confidence", 0))
-        escalate = result.get("escalate", False)
-
         st.subheader("📊 Decision")
-        st.markdown(f"**Urgency:** {urgency_color.get(urgency, '🟢 Low')}")
-        st.markdown(f"**Category:** 🏷️ `{str(result.get('category','Other')).capitalize()}`")
-        st.markdown(f"**Customer Mood:** {sentiment_icon.get(sentiment, '😐 Neutral')}")
+
+        urgency_color = {
+            "low": "🟢 Low",
+            "medium": "🟡 Medium",
+            "high": "🔴 High"
+        }
+        st.markdown(f"**Urgency:** {urgency_color.get(result.get('urgency','low'))}")
+
+        st.markdown(f"**Category:** 🏷️ `{result.get('category','Other').capitalize()}`")
+
+        sentiment_icon = {
+            "calm": "😌 Calm",
+            "neutral": "😐 Neutral",
+            "angry": "😠 Angry"
+        }
+        st.markdown(f"**Customer Mood:** {sentiment_icon.get(result.get('sentiment','neutral'))}")
+
+        # --------- CONFIDENCE ----------
+        confidence = result.get("confidence", 0)
         st.markdown("**Confidence**")
         st.progress(int(confidence * 100))
 
         if confidence < CONFIDENCE_THRESHOLD:
             st.warning("⚠️ Low confidence. Auto-escalation suggested.")
-            escalate = True
+            result["escalate"] = True
 
-        if escalate:
+        if result.get("escalate"):
             st.error("🚨 Escalation Required")
         else:
             st.success("✅ No Escalation Needed")
@@ -82,40 +78,36 @@ if page == "Analyze Ticket":
         st.subheader("✉️ Suggested Reply")
         st.write(result.get("suggested_reply", "No suggestion available"))
 
-        # --------- LOG TO SUPABASE (AFTER UI) ----------
+        # --------- LOG TO SUPABASE (RLS friendly) ----------
         try:
             supabase.table("support_audit_logs").insert({
-                "user_id": st.session_state["user"]["id"],
+                "user_id": st.session_state["user"]["id"],  # Must match auth.uid()
                 "ticket_text": ticket,
-                "urgency": urgency,
-                "category": str(result.get("category","Other")).capitalize(),
-                "sentiment": sentiment,
-                "escalate": escalate,
-                "confidence": confidence
+                "urgency": result.get("urgency"),
+                "category": result.get("category"),
+                "sentiment": result.get("sentiment"),
+                "escalate": result.get("escalate"),
+                "confidence": result.get("confidence")
             }).execute()
-            st.success("✅ Ticket logged successfully")
+            st.success("✅ Ticket logged successfully!")
         except Exception as e:
             st.error(f"❌ Failed to log ticket: {e}")
 
-# =========================
+# ==================================================
 # 📜 PAGE 2 — AUDIT LOGS
-# =========================
+# ==================================================
 elif page == "Audit Logs":
     st.title("📜 Audit Logs")
 
-    try:
-        logs = (
-            supabase
-            .table("support_audit_logs")
-            .select("*")
-            .eq("user_id", st.session_state["user"]["id"])
-            .order("created_at", desc=True)
-            .execute()
-            .data
-        )
-    except Exception as e:
-        st.error(f"❌ Failed to fetch logs: {e}")
-        logs = []
+    logs = (
+        supabase
+        .table("support_audit_logs")
+        .select("*")
+        .eq("user_id", st.session_state["user"]["id"])
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
 
     if not logs:
         st.info("No logs yet.")
@@ -125,52 +117,30 @@ elif page == "Audit Logs":
                 st.markdown(f"**Urgency:** {log.get('urgency','')}")
                 st.markdown(f"**Sentiment:** {log.get('sentiment','')}")
                 st.markdown(f"**Escalate:** {log.get('escalate',False)}")
-                st.progress(int(log.get("confidence",0) * 100))
+                st.progress(int(log.get("confidence",0)*100))
                 st.markdown("**Ticket:**")
                 st.write(log.get("ticket_text",""))
 
-        # CSV export
+        # CSV Export
         df = pd.DataFrame(logs)
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("⬇️ Export CSV", csv, "audit_logs.csv", "text/csv")
 
-# =========================
-# 📊 PAGE 3 — SAMPLE TICKETS
-# =========================
-elif page == "Sample Tickets":
-    st.title("📝 Sample Tickets")
-    sample_tickets = [
-        "My internet has been down for 3 days. Please help!",
-        "I received a damaged product and need a refund.",
-        "The app keeps crashing whenever I try to login.",
-        "I want to upgrade my plan to premium.",
-        "I haven't received my order yet. Order #12345"
-    ]
-    for ticket in sample_tickets:
-        st.write(f"- {ticket}")
+# ==================================================
+# 📈 PAGE 3 — MANAGER DASHBOARD
+# ==================================================
+elif page == "Manager Dashboard":
+    manager_dashboard()  # Implement charts, trends, escalations
 
-# =========================
-# 📊 PAGE 4 — SETTINGS
-# =========================
+# ==================================================
+# 🛠️ PAGE 4 — ADMIN DASHBOARD
+# ==================================================
+elif page == "Admin Dashboard":
+    admin_dashboard()  # Implement counts, user management, SaaS controls
+
+# ==================================================
+# ⚙️ PAGE 5 — SETTINGS
+# ==================================================
 elif page == "Settings":
-    st.title("⚙️ Settings")
-    st.write("Manage your preferences here (coming soon)")
-
-# =========================
-# 📊 PAGE 5 — HELP
-# =========================
-elif page == "Help":
-    st.title("❓ Help")
-    st.write("Contact support or read documentation (coming soon)")
-
-# =========================
-# 📊 PAGE 6 — MANAGER DASHBOARD
-# =========================
-elif page == "Manager Dashboard" and user_role == "admin":
-    manager_dashboard()
-
-# =========================
-# 📊 PAGE 7 — ADMIN DASHBOARD
-# =========================
-elif page == "Admin Dashboard" and user_role == "admin":
-    admin_dashboard()
+    st.title("⚙️ Settings & Billing")
+    st.write("Add Stripe billing integration here and other SaaS configs")
