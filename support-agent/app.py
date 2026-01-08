@@ -1,37 +1,24 @@
-# app.py
 import streamlit as st
-import pandas as pd
 from graph.workflow import build_graph
 from utils.supabase_client import supabase
 from utils.auth import login, signup, logout
+from utils.roles import is_admin, is_manager
 from dashboards.admin import admin_dashboard
 from dashboards.manager import manager_dashboard
-import stripe
 
-# ---------------- CONFIG ----------------
 CONFIDENCE_THRESHOLD = 0.6
-st.set_page_config(page_title="AI Support Triage SaaS", layout="wide")
 
-# ---------------- STRIPE ----------------
-stripe.api_key = st.secrets["STRIPE_SECRET_KEY"]
+st.set_page_config(
+    page_title="AI Support Triage",
+    page_icon="🎧",
+    layout="wide"
+)
 
-def create_checkout_session(email):
-    session = stripe.checkout.Session.create(
-        customer_email=email,
-        payment_method_types=["card"],
-        line_items=[{
-            "price": st.secrets["STRIPE_PRICE_ID"],
-            "quantity": 1,
-        }],
-        mode="subscription",
-        success_url=st.secrets["APP_URL"] + "/success",
-        cancel_url=st.secrets["APP_URL"] + "/cancel",
-    )
-    return session.url
-
-# ---------------- AUTH ----------------
+# ------------------------------------------------
+# AUTH GATE
+# ------------------------------------------------
 if "user" not in st.session_state:
-    st.write("## 🔐 Please login or sign up")
+    st.markdown("## 🔐 Welcome to AI Support Triage")
     tab1, tab2 = st.tabs(["Login", "Sign up"])
     with tab1:
         login()
@@ -39,103 +26,105 @@ if "user" not in st.session_state:
         signup()
     st.stop()
 
-# ---------------- LOGOUT ----------------
-st.sidebar.button("🔓 Logout", on_click=logout)
+user = st.session_state["user"]
 
-# ---------------- NAVIGATION ----------------
-role = st.session_state["user"]["role"]
+# ------------------------------------------------
+# SIDEBAR (ROLE BASED)
+# ------------------------------------------------
+st.sidebar.markdown("### 🎛️ Control Panel")
+
 pages = ["Analyze Ticket", "Audit Logs"]
-if role in ["manager"]:
+
+if is_manager(user):
     pages.append("Manager Dashboard")
-if role in ["admin"]:
+
+if is_admin(user):
     pages.append("Admin Dashboard")
 
-page = st.sidebar.radio("Navigation", pages)
+page = st.sidebar.radio("Navigate", pages)
 
-# ==================================================
-# 📊 PAGE: Analyze Ticket
-# ==================================================
+st.sidebar.divider()
+logout()
+
+# ------------------------------------------------
+# ANALYZE TICKET (AGENTS)
+# ------------------------------------------------
 if page == "Analyze Ticket":
-    st.title("🎧 AI Support Triage Agent")
-    ticket = st.text_area("Paste customer ticket here...")
+    st.title("🎧 AI Support Triage")
 
-    if st.button("Analyze Ticket"):
+    ticket = st.text_area(
+        "Paste customer ticket",
+        placeholder="Customer complaint, email, or chat message here…"
+    )
+
+    if st.button("🚀 Analyze Ticket", use_container_width=True):
         graph = build_graph()
         result = graph.invoke({"ticket": ticket})
 
-        # ----- DECISION UI -----
         st.subheader("📊 Decision")
-        urgency_color = {"low":"🟢 Low","medium":"🟡 Medium","high":"🔴 High"}
-        sentiment_icon = {"calm":"😌 Calm","neutral":"😐 Neutral","angry":"😠 Angry"}
-        st.markdown(f"**Urgency:** {urgency_color.get(result.get('urgency','low'))}")
-        st.markdown(f"**Category:** 🏷️ `{result.get('category','Other').capitalize()}`")
-        st.markdown(f"**Customer Mood:** {sentiment_icon.get(result.get('sentiment','neutral'))}")
-        st.markdown("**Confidence**")
-        st.progress(int(result.get("confidence",0) * 100))
 
-        if result.get("confidence",0) < CONFIDENCE_THRESHOLD:
-            st.warning("⚠️ Low confidence. Auto-escalation suggested.")
+        urgency_map = {
+            "low": "🟢 Low",
+            "medium": "🟡 Medium",
+            "high": "🔴 High"
+        }
+        st.markdown(f"**Urgency:** {urgency_map.get(result['urgency'])}")
+        st.markdown(f"**Category:** 🏷️ `{result['category'].title()}`")
+
+        mood_map = {
+            "calm": "😌 Calm",
+            "neutral": "😐 Neutral",
+            "angry": "😠 Angry"
+        }
+        st.markdown(f"**Customer Mood:** {mood_map.get(result['sentiment'])}")
+
+        confidence = result["confidence"]
+        st.markdown("**Confidence**")
+        st.progress(int(confidence * 100))
+
+        if confidence < CONFIDENCE_THRESHOLD:
+            st.warning("⚠️ Low confidence — escalation recommended")
             result["escalate"] = True
 
-        if result.get("escalate"):
+        if result["escalate"]:
             st.error("🚨 Escalation Required")
         else:
             st.success("✅ No Escalation Needed")
 
         st.subheader("✉️ Suggested Reply")
-        st.write(result.get("suggested_reply","No suggestion available"))
+        st.write(result["suggested_reply"])
 
-        # ----- LOG TO SUPABASE -----
+        # LOG AFTER UI
         supabase.table("support_audit_logs").insert({
-            "user_id": st.session_state["user"]["id"],
+            "user_id": user["id"],
             "ticket_text": ticket,
-            "urgency": result.get("urgency"),
-            "category": result.get("category"),
-            "sentiment": result.get("sentiment"),
-            "escalate": result.get("escalate"),
-            "confidence": result.get("confidence")
+            "urgency": result["urgency"],
+            "category": result["category"],
+            "sentiment": result["sentiment"],
+            "escalate": result["escalate"],
+            "confidence": result["confidence"]
         }).execute()
 
-# ==================================================
-# 📜 PAGE: Audit Logs
-# ==================================================
+# ------------------------------------------------
+# AUDIT LOGS (AGENTS)
+# ------------------------------------------------
 if page == "Audit Logs":
     st.title("📜 Your Audit Logs")
+
     logs = (
         supabase
         .table("support_audit_logs")
         .select("*")
-        .eq("user_id", st.session_state["user"]["id"])
+        .eq("user_id", user["id"])
         .order("created_at", desc=True)
         .execute()
         .data
     )
 
     if not logs:
-        st.info("No logs yet.")
+        st.info("No tickets analyzed yet.")
     else:
         for log in logs:
-            with st.expander(f"🕒 {log.get('created_at','')} — {log.get('category','Other')}"):
-                st.markdown(f"**Urgency:** {log.get('urgency','')}")
-                st.markdown(f"**Sentiment:** {log.get('sentiment','')}")
-                st.markdown(f"**Escalate:** {log.get('escalate',False)}")
-                st.progress(int(log.get("confidence",0)*100))
-                st.markdown("**Ticket:**")
-                st.write(log.get("ticket_text",""))
-
-        # CSV export
-        df = pd.DataFrame(logs)
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Export CSV", csv, "audit_logs.csv", "text/csv")
-
-# ==================================================
-# 📈 PAGE: Manager Dashboard
-# ==================================================
-if page == "Manager Dashboard":
-    manager_dashboard()
-
-# ==================================================
-# 📊 PAGE: Admin Dashboard
-# ==================================================
-if page == "Admin Dashboard":
-    admin_dashboard()
+            with st.expander(f"🕒 {log['created_at']} — {log['category']}"):
+                st.markdown(f"**Urgency:** {log['urgency']}")
+                st.markdown(f"**Sentiment:** {log['sentiment']}")
