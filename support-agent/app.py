@@ -1,10 +1,10 @@
 import streamlit as st
-import pandas as pd
-import random
+from graph.workflow import build_graph
 from utils.supabase_client import supabase
 from utils.auth import login, signup, logout
 from dashboards.admin import admin_dashboard
 from dashboards.manager import manager_dashboard
+import pandas as pd
 
 # ---------------- CONFIG ----------------
 CONFIDENCE_THRESHOLD = 0.6
@@ -26,107 +26,79 @@ st.sidebar.button("Logout", on_click=logout)
 
 # ---------------- NAVIGATION ----------------
 page = st.sidebar.radio(
-    "Navigate",
+    "Navigation",
     ["Analyze Ticket", "Audit Logs", "Admin Dashboard", "Manager Dashboard", "Help"]
 )
-
-# ---------------- SIMPLE AI CLASSIFIER ----------------
-def simple_ai_classify(ticket_text):
-    ticket_text_lower = ticket_text.lower()
-    if any(x in ticket_text_lower for x in ["urgent", "immediately", "cancel", "payment", "lost", "error"]):
-        urgency = "high"
-        sentiment = "angry"
-        escalate = True
-    elif any(x in ticket_text_lower for x in ["problem", "issue", "delay"]):
-        urgency = "medium"
-        sentiment = "neutral"
-        escalate = False
-    else:
-        urgency = "low"
-        sentiment = "calm"
-        escalate = False
-
-    confidence = random.uniform(0.7, 0.99)
-    category = "billing" if "payment" in ticket_text_lower else "other"
-    return {
-        "urgency": urgency,
-        "category": category,
-        "sentiment": sentiment,
-        "escalate": escalate,
-        "confidence": confidence,
-        "suggested_reply": "Thanks for reaching out. We’ve received your request and our support team will review it shortly."
-    }
 
 # ==================================================
 # 📊 PAGE 1 — ANALYZE TICKET
 # ==================================================
 if page == "Analyze Ticket":
-    ticket = st.text_area("Paste customer ticket here…", height=150)
+    st.subheader("Paste customer ticket here…")
+    ticket = st.text_area("", placeholder="Customer complaint, email, or chat message…")
 
-    if st.button("Analyze Ticket"):
-        if not ticket.strip():
-            st.warning("⚠️ Please enter a ticket to analyze.")
+    if st.button("Analyze Ticket") and ticket.strip():
+        graph = build_graph()
+        result = graph.invoke({"ticket": ticket})
+
+        # --------- DECISION UI ----------
+        st.subheader("📊 Decision")
+        urgency_color = {"low": "🟢 Low", "medium": "🟡 Medium", "high": "🔴 High"}
+        sentiment_icon = {"calm": "😌 Calm", "neutral": "😐 Neutral", "angry": "😠 Angry"}
+
+        urgency = result.get("urgency", "low")
+        category = result.get("category", "Other")
+        sentiment = result.get("sentiment", "neutral")
+        escalate = result.get("escalate", False)
+        confidence = result.get("confidence", 0)
+
+        st.markdown(f"**Urgency:** {urgency_color.get(urgency,'🟢 Low')}")
+        st.markdown(f"**Category:** 🏷️ `{category.capitalize()}`")
+        st.markdown(f"**Customer Mood:** {sentiment_icon.get(sentiment,'😐 Neutral')}")
+        st.markdown("**Confidence**")
+        st.progress(int(confidence * 100))
+
+        if confidence < CONFIDENCE_THRESHOLD:
+            st.warning("⚠️ Low confidence. Manual review recommended.")
+            escalate = True
+
+        if escalate:
+            st.error("🚨 Escalation Required")
         else:
-            result = simple_ai_classify(ticket)
+            st.success("✅ No Escalation Needed")
 
-            # --------- DECISION UI ----------
-            st.subheader("📊 Decision")
-            urgency_color = {"low": "🟢 Low", "medium": "🟡 Medium", "high": "🔴 High"}
-            sentiment_icon = {"calm": "😌 Calm", "neutral": "😐 Neutral", "angry": "😠 Angry"}
+        st.subheader("✉️ Suggested Reply")
+        st.write(result.get("suggested_reply","Thanks for reaching out. We’ve received your request and our support team will review it shortly."))
 
-            st.markdown(f"**Urgency:** {urgency_color[result['urgency']]}")
-            st.markdown(f"**Category:** 🏷️ `{result['category'].capitalize()}`")
-            st.markdown(f"**Customer Mood:** {sentiment_icon[result['sentiment']]}")
-
-            # --------- CONFIDENCE ----------
-            st.markdown("**Confidence**")
-            st.progress(int(result["confidence"] * 100))
-
-            # --------- CONFIDENCE WARNING ----------
-            if result["confidence"] < CONFIDENCE_THRESHOLD:
-                st.warning("⚠️ Low confidence. Manual review recommended.")
-
-            # --------- ESCALATION ----------
-            if result["escalate"]:
-                st.error("🚨 Escalation Required")
-            else:
-                st.success("✅ No Escalation Needed")
-
-            # --------- SUGGESTED REPLY ----------
-            st.subheader("✉️ Suggested Reply")
-            st.write(result["suggested_reply"])
-
-            # --------- LOG TO SUPABASE (AFTER UI) ----------
-            try:
-                supabase.table("support_audit_logs").insert({
-                    "user_id": st.session_state["user"]["id"],  # Must match auth.uid()
-                    "ticket_text": ticket,
-                    "urgency": result["urgency"],
-                    "category": result["category"],
-                    "sentiment": result["sentiment"],
-                    "escalate": result["escalate"],
-                    "confidence": result["confidence"]
-                }).execute()
-            except Exception as e:
-                st.error(f"❌ Failed to log ticket: {e}")
+        # --------- LOG TO SUPABASE (RLS-SAFE) ----------
+        try:
+            supabase.table("support_audit_logs").insert({
+                "user_id": st.session_state["user"]["id"],  # must match auth.uid()
+                "ticket_text": ticket,
+                "urgency": urgency,
+                "category": category,
+                "sentiment": sentiment,
+                "escalate": escalate,
+                "confidence": confidence
+            }).execute()
+            st.success("✅ Ticket logged successfully")
+        except Exception as e:
+            st.error(f"❌ Failed to log ticket: {e}")
 
 # ==================================================
 # 📜 PAGE 2 — AUDIT LOGS
 # ==================================================
 if page == "Audit Logs":
-    st.title("📜 Audit Logs")
-    try:
-        logs = (
-            supabase.table("support_audit_logs")
-            .select("*")
-            .eq("user_id", st.session_state["user"]["id"])
-            .order("created_at", desc=True)
-            .execute()
-            .data
-        )
-    except Exception as e:
-        st.error(f"❌ Failed to fetch logs: {e}")
-        logs = []
+    st.subheader("📜 Your Audit Logs")
+    logs = (
+        supabase
+        .table("support_audit_logs")
+        .select("*")
+        .eq("user_id", st.session_state["user"]["id"])
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
 
     if not logs:
         st.info("No logs yet.")
@@ -143,28 +115,34 @@ if page == "Audit Logs":
         # Export CSV
         df = pd.DataFrame(logs)
         csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Export CSV", csv, "audit_logs.csv", "text/csv")
+        st.download_button(
+            "⬇️ Export CSV",
+            csv,
+            "audit_logs.csv",
+            "text/csv"
+        )
 
 # ==================================================
-# 🛠️ PAGE 3 — ADMIN DASHBOARD
+# 🛠 PAGE 3 — ADMIN DASHBOARD
 # ==================================================
 if page == "Admin Dashboard":
-    admin_dashboard()
+    admin_dashboard()  # your colorful charts, escalations, trends, Stripe integration
 
 # ==================================================
-# 📊 PAGE 4 — MANAGER DASHBOARD
+# 🏢 PAGE 4 — MANAGER DASHBOARD
 # ==================================================
 if page == "Manager Dashboard":
-    manager_dashboard()
+    manager_dashboard()  # aggregate views, team stats, approvals
 
 # ==================================================
 # ❓ PAGE 5 — HELP
 # ==================================================
 if page == "Help":
-    st.title("💡 Help & Instructions")
+    st.subheader("📌 How to use AI Support Triage")
     st.markdown("""
-    - Navigate using the sidebar.
-    - Paste customer tickets to analyze them.
-    - Admins can view all logs and trends.
-    - Managers can monitor escalations.
+    1. Go to 'Analyze Ticket' and paste customer messages.
+    2. Check the AI's urgency, sentiment, and suggested reply.
+    3. Low confidence triggers manual review.
+    4. All tickets are logged automatically.
+    5. Admins can see trends, escalations, and Stripe billing.
     """)
