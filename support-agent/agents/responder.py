@@ -1,14 +1,6 @@
-from langchain_openai import ChatOpenAI
-
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
-
-
 def generate_reply(state):
-    prompt = open("prompts/reply.txt").read()
-
-    response = llm.invoke(
-        f"{prompt}\n\nTicket:\n{state['ticket']}"
+    state["suggested_reply"] = (
+        "Thanks for reaching out. We’ve received your request and "
+        "our support team will review it shortly."
     )
-
-    state["suggested_reply"] = response.content
     return state
