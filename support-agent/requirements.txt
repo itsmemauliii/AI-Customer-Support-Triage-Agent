@@ -1,8 +1,7 @@
 streamlit
 langgraph
 langchain
-langchain-openai
 pydantic
 python-dotenv
 supabase
-python-dotenv
+stripe
