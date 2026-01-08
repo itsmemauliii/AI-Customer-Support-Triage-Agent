@@ -1,5 +1,6 @@
 import streamlit as st
 from graph.workflow import build_graph
+from utils.supabase_client import supabase
 
 st.set_page_config(page_title="AI Support Triage Agent")
 
@@ -52,3 +53,12 @@ st.markdown("**Confidence**")
 st.progress(int(result["confidence"] * 100))
 st.subheader("✉️ Suggested Reply")
 st.write(result["suggested_reply"])
+
+supabase.table("support_audit_logs").insert({
+    "ticket_text": ticket,
+    "urgency": result["urgency"],
+    "category": result["category"],
+    "sentiment": result["sentiment"],
+    "escalate": result["escalate"],
+    "confidence": result["confidence"]
+}).execute()
