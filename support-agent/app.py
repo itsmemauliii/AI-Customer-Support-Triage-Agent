@@ -1,22 +1,25 @@
 import streamlit as st
 from graph.workflow import build_graph
 from utils.supabase_client import supabase
-from utils.auth import login, signup
+from utils.auth import login, signup, logout
 
 # ---------------- CONFIG ----------------
 CONFIDENCE_THRESHOLD = 0.6
-
 st.set_page_config(page_title="AI Support Triage", layout="centered")
 st.title("🎧 AI Support Triage Agent")
 
 # ---------------- AUTH GATE ----------------
 if "user" not in st.session_state:
+    st.write("## 🔐 Please login or sign up")
     tab1, tab2 = st.tabs(["Login", "Sign up"])
     with tab1:
         login()
     with tab2:
         signup()
     st.stop()
+
+# ---------------- LOGOUT ----------------
+logout()  # sidebar logout button
 
 # ---------------- NAVIGATION ----------------
 page = st.sidebar.radio(
@@ -42,45 +45,46 @@ if page == "Analyze Ticket":
             "medium": "🟡 Medium",
             "high": "🔴 High"
         }
-        st.markdown(f"**Urgency:** {urgency_color[result['urgency']]}")
+        st.markdown(f"**Urgency:** {urgency_color.get(result.get('urgency','low'))}")
 
-        st.markdown(f"**Category:** 🏷️ `{result['category'].capitalize()}`")
+        st.markdown(f"**Category:** 🏷️ `{result.get('category','Other').capitalize()}`")
 
         sentiment_icon = {
             "calm": "😌 Calm",
             "neutral": "😐 Neutral",
             "angry": "😠 Angry"
         }
-        st.markdown(f"**Customer Mood:** {sentiment_icon[result['sentiment']]}")
+        st.markdown(f"**Customer Mood:** {sentiment_icon.get(result.get('sentiment','neutral'))}")
 
         # --------- CONFIDENCE ----------
+        confidence = result.get("confidence", 0)
         st.markdown("**Confidence**")
-        st.progress(int(result["confidence"] * 100))
+        st.progress(int(confidence * 100))
 
         # --------- CONFIDENCE WARNING ----------
-        if result["confidence"] < CONFIDENCE_THRESHOLD:
+        if confidence < CONFIDENCE_THRESHOLD:
             st.warning("⚠️ Low confidence. Auto-escalation suggested.")
             result["escalate"] = True
 
         # --------- ESCALATION ----------
-        if result["escalate"]:
+        if result.get("escalate"):
             st.error("🚨 Escalation Required")
         else:
             st.success("✅ No Escalation Needed")
 
         # --------- SUGGESTED REPLY ----------
         st.subheader("✉️ Suggested Reply")
-        st.write(result["suggested_reply"])
+        st.write(result.get("suggested_reply","No suggestion available"))
 
         # --------- LOG TO SUPABASE (AFTER UI) ----------
         supabase.table("support_audit_logs").insert({
             "user_id": st.session_state["user"]["id"],
             "ticket_text": ticket,
-            "urgency": result["urgency"],
-            "category": result["category"],
-            "sentiment": result["sentiment"],
-            "escalate": result["escalate"],
-            "confidence": result["confidence"]
+            "urgency": result.get("urgency"),
+            "category": result.get("category"),
+            "sentiment": result.get("sentiment"),
+            "escalate": result.get("escalate"),
+            "confidence": result.get("confidence")
         }).execute()
 
 # ==================================================
@@ -103,10 +107,10 @@ if page == "Audit Logs":
         st.info("No logs yet.")
     else:
         for log in logs:
-            with st.expander(f"🕒 {log['created_at']} — {log['category']}"):
-                st.markdown(f"**Urgency:** {log['urgency']}")
-                st.markdown(f"**Sentiment:** {log['sentiment']}")
-                st.markdown(f"**Escalate:** {log['escalate']}")
-                st.progress(int(log["confidence"] * 100))
+            with st.expander(f"🕒 {log.get('created_at','')} — {log.get('category','Other')}"):
+                st.markdown(f"**Urgency:** {log.get('urgency','')}")
+                st.markdown(f"**Sentiment:** {log.get('sentiment','')}")
+                st.markdown(f"**Escalate:** {log.get('escalate',False)}")
+                st.progress(int(log.get("confidence",0) * 100))
                 st.markdown("**Ticket:**")
-                st.write(log["ticket_text"])
+                st.write(log.get("ticket_text",""))
