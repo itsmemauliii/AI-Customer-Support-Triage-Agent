@@ -14,7 +14,10 @@ def login():
         })
         st.session_state["user"] = res.user
         st.rerun()
-
+def logout():
+    if st.sidebar.button("🚪 Logout"):
+        st.session_state.clear()
+        st.rerun()
 
 def signup():
     st.subheader("🆕 Sign up")
